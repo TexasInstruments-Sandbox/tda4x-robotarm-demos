@@ -1,0 +1,255 @@
+diff --git a/apps_python/gst_wrapper.py b/apps_python/gst_wrapper.py
+index 0703c40..7919727 100644
+--- a/apps_python/gst_wrapper.py
++++ b/apps_python/gst_wrapper.py
+@@ -268,6 +268,9 @@ def get_input_str(input):
+             source_cmd += 'image/jpeg, width=%d, height=%d ! ' % \
+                                                      (input.width, input.height)
+             source_cmd += 'jpegdec !'
++            # Jared Edit
++            # mirror the source video
++            source_cmd += ' videoflip method=horizontal-flip !'
+             source_cmd += ' tiovxdlcolorconvert ! video/x-raw, format=NV12 ! '
+         elif input.format == 'NV12':
+             source_cmd = 'v4l2src device=%s ! ' % input.source
+@@ -407,6 +410,7 @@ def get_output_str(output):
+ 
+     if (output.mosaic):
+         sink_cmd = '! video/x-raw,format=NV12, width=%d, height=%d ' % (output.width,output.height) + '!' + sink_cmd
++        
+ 
+         # To be prepended to the sink_cmd after mosaic element properties are added by subflows
+         bg_cmd = ''
+diff --git a/apps_python/infer_pipe.py b/apps_python/infer_pipe.py
+index 2b220dc..f45bc00 100644
+--- a/apps_python/infer_pipe.py
++++ b/apps_python/infer_pipe.py
+@@ -69,6 +69,8 @@ class InferPipe:
+         """
+         Stop the pipeline
+         """
++        # Jared Edit
++        self.post_proc.stop()
+         self.stop_thread = True
+ 
+     def wait_for_exit(self):
+diff --git a/apps_python/post_process.py b/apps_python/post_process.py
+index c7347a4..8cb4c7e 100644
+--- a/apps_python/post_process.py
++++ b/apps_python/post_process.py
+@@ -30,11 +30,21 @@
+ 
+ from classnames import *
+ import cv2
++import math
+ import numpy as np
+ import copy
+ import debug
+ np.set_printoptions(threshold=np.inf, linewidth=np.inf)
+ 
++import rospy
++import actionlib
++from geometry_msgs.msg import Point
++from shape_msgs.msg import SolidPrimitive
++from niryo_robot_msgs.msg import RPY
++from niryo_robot_arm_commander.msg import ArmMoveCommand, RobotMoveAction, RobotMoveGoal
++from robot_arm_follow_demo.msg import Frame
++from robot_arm_follow_demo.msg import HumanPose
++
+ def create_title_frame(title, width, height):
+     frame = np.zeros((height, width, 3), np.uint8)
+     frame = cv2.putText(frame, "Texas Instruments - Edge Analytics", \
+@@ -77,6 +87,10 @@ class PostProcess:
+         elif (flow.model.task_type == 'human_pose_estimation'):
+             return PostProcessPoseEstimation(flow)
+ 
++    # Jared Edit
++    def stop(self):
++        return
++
+ class PostProcessClassification(PostProcess):
+     def __init__(self, flow):
+         super().__init__(flow)
+@@ -294,7 +308,7 @@ class PostProcessPoseEstimation(PostProcess):
+                             [51, 153, 255], [255, 153, 153], [255, 102, 102],
+                             [255, 51, 51], [153, 255, 153], [102, 255, 102],
+                             [51, 255, 51], [0, 255, 0], [0, 0, 255], [255, 0, 0],
+-                            [255, 255, 255]])
++                            [255, 255, 255], [100, 0, 100]])
+ 
+         # This list gives the information that which two keypoints needs to connect.
+         self.skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12],
+@@ -303,9 +317,18 @@ class PostProcessPoseEstimation(PostProcess):
+         # Choosing color of a link
+         self.pose_limb_color = self.palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
+         # Choosing color of a keypoint
+-        self.pose_kpt_color = self.palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
++        self.pose_kpt_color = self.palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 20, 0, 9, 9, 9, 9, 9, 9]]
+         self.radius = 5
+ 
++        # Jared Edit
++        # initialize the ROS publisher
++        self.__publisher = rospy.Publisher("human_pose", HumanPose, queue_size=1)
++        rospy.init_node("human_pose_publisher", disable_signals=True)
++
++        self.enableTracking        = True
++        self.restrictArmCenter     = True
++        self.prev_arm_range_center = [-1, -1]
++
+     def __call__(self, img, result):
+         """
+         Post process function for pose estimation
+@@ -336,6 +359,50 @@ class PostProcessPoseEstimation(PostProcess):
+                 cv2.putText(img, "score:{:2.1f}".format(det_scores[idx]), (int(det_bbox[0] + 5), \
+                                 int(det_bbox[1]) + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_map[::-1], 2)
+                 img = self.plot_skeleton_kpts(img, kpt)
++
++        # Jared Edits
++        # find the first valid person and send their pose to the /human_pose topic
++        if self.enableTracking == True:
++            # if prev_arm_range_center was not set, set it to image center
++            if self.prev_arm_range_center[0] == -1 and self.prev_arm_range_center[1] == -1:
++                self.prev_arm_range_center = [img.shape[1]/2, img.shape[0]/2]  # [x, y]
++
++            # Get the number of detection
++            numDetection  = 0
++            minCenterDist = 10000
++            bestIdx       = -1
++            bestArmCenter = [-1, -1]
++            for idx in range(len(det_bboxes)):
++                if det_scores[idx] > self.model.viz_threshold:
++                    numDetection += 1
++                    kpt = kpts[idx]
++                    arm_range_center = self.compute_arm_range_center(img, kpt)
++                    centerDist = math.dist((arm_range_center[0], arm_range_center[1]), (self.prev_arm_range_center[0], self.prev_arm_range_center[1]))
++                    if (centerDist < minCenterDist):
++                        minCenterDist = centerDist
++                        bestIdx       = idx
++                        bestArmCenter = arm_range_center
++
++            if (numDetection == 0 or abs(bestArmCenter[0] - self.prev_arm_range_center[0]) > img.shape[1]/2 or abs(bestArmCenter[1] - self.prev_arm_range_center[1]) > img.shape[0]/2):
++                bestIdx = -1
++                self.prev_arm_range_center = [img.shape[1]/2, img.shape[0]/2]  # [x, y]
++            elif (self.restrictArmCenter == True and (bestArmCenter[0] < img.shape[1]/6 or bestArmCenter[0] > img.shape[1]*5/6 or bestArmCenter[1] < img.shape[0]/6 or bestArmCenter[1] > img.shape[0]*5/6)):
++                bestIdx = -1
++                self.prev_arm_range_center = [img.shape[1]/2, img.shape[0]/2]  # [x, y]
++            else:
++                self.prev_arm_range_center = bestArmCenter
++
++            if (bestIdx != -1):
++                kpt = kpts[bestIdx]
++                img = self.publish_human_pose(img, kpt)
++
++        else:
++            for idx in range(len(det_bboxes)):
++                if det_scores[idx] > self.model.viz_threshold:
++                    kpt = kpts[idx]
++                    img = self.publish_human_pose(img, kpt)
++                    break
++
+         return img
+ 
+     def plot_skeleton_kpts(self, img, kpts, steps=3):
+@@ -347,7 +414,6 @@ class PostProcessPoseEstimation(PostProcess):
+             kpts (numoy array): Contains the co-ordinates and confidence score of a single person.
+             steps: by default 3 values are needed to represent each keypoint (x_cord, y_cord, conf).
+         """
+-
+         num_kpts = len(kpts) // steps
+         for kid in range(num_kpts):
+             r, g, b = self.pose_kpt_color[kid]
+@@ -371,4 +437,61 @@ class PostProcessPoseEstimation(PostProcess):
+             if conf1 > 0.5 and conf2 > 0.5:
+                 # Connecting two keypoints with line
+                 cv2.line(img, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
++
++        return img
++
++    def compute_arm_range_center(self, img, kpts, steps=3):
++        # create the human pose list to pass to the message
++        human_pose_list = [Point(x=None, y=(kpts[point * steps] * img.shape[1] / self.model.resize[0]), z=(kpts[point * steps + 1] * img.shape[0] / self.model.resize[1])) for point in range(len(kpts) // steps)]
++
++        # plot the frame the robot expects for an arm
++        # left_shoulder, right_shoulder, left_hip, right_hip: 5, 6, 11, 12
++        shoulder_to_hip_dist = math.dist((human_pose_list[5].y, human_pose_list[5].z), (human_pose_list[11].y, human_pose_list[11].z))
++
++        arm_range_center_x = human_pose_list[5].y
++        arm_range_center_y = human_pose_list[5].z + shoulder_to_hip_dist / 2
++
++        return [arm_range_center_x, arm_range_center_y]
++
++
++    def publish_human_pose(self, img, kpts, steps=3):
++        # create the human pose list to pass to the message
++        human_pose_list = [Point(x=None, y=(kpts[point * steps] * img.shape[1] / self.model.resize[0]), z=(kpts[point * steps + 1] * img.shape[0] / self.model.resize[1])) for point in range(len(kpts) // steps)]
++
++        # plot the frame the robot expects for an arm
++        # left_shoulder, right_shoulder, left_hip, right_hip: 5, 6, 11, 12
++        shoulder_to_hip_dist = math.dist((human_pose_list[5].y, human_pose_list[5].z), (human_pose_list[11].y, human_pose_list[11].z))
++        
++        arm_range_height = arm_range_width = 1.5 * shoulder_to_hip_dist
++        arm_range_center_x = human_pose_list[5].y
++        arm_range_center_y = human_pose_list[5].z + shoulder_to_hip_dist / 2
++
++        img_frame = [
++                (int(arm_range_center_x - arm_range_width / 2), int(arm_range_center_y - arm_range_height / 2)),
++                (int(arm_range_center_x + arm_range_width / 2), int(arm_range_center_y - arm_range_height / 2)),
++                (int(arm_range_center_x + arm_range_width / 2), int(arm_range_center_y + arm_range_height / 2)),
++                (int(arm_range_center_x - arm_range_width / 2), int(arm_range_center_y + arm_range_height / 2))
++                ]
++        
++        for index in range(len(img_frame)):
++            cv2.line(img, img_frame[index], img_frame[(index + 1) % len(img_frame)], (100, 0, 100), thickness=6)
++
++        # send goal to the topic
++        box = SolidPrimitive(type=SolidPrimitive.BOX, dimensions=[0, arm_range_width, arm_range_height])
++        center = Point(x=None, y=(arm_range_center_x), z=(img.shape[0] - arm_range_center_y))
++        frame = Frame(box=box, center_point=center)
++
++        # convert the z values to real space instead of pixel space
++        for index in range(len(human_pose_list)):
++            human_pose_list[index].y = human_pose_list[index].y
++            human_pose_list[index].z = img.shape[0] - human_pose_list[index].z
++
++        human_pose_list.append(frame)
++
++        pose = HumanPose(*human_pose_list)
++        self.__publisher.publish(pose)
++
+         return img
++
++    def stop(self):
++        rospy.signal_shutdown("Keyboard interrupt: rospy shutdown initiated")
+diff --git a/configs/human_pose_estimation.yaml b/configs/human_pose_estimation.yaml
+index 61c607d..d998a28 100644
+--- a/configs/human_pose_estimation.yaml
++++ b/configs/human_pose_estimation.yaml
+@@ -4,8 +4,8 @@ inputs:
+     input0:
+         source: /dev/video2
+         format: jpeg
+-        width: 1280
+-        height: 720
++        width: 1920
++        height: 1080
+         framerate: 30
+     input1:
+         source: /opt/edge_ai_apps/data/videos/video_0001_h264.mp4
+@@ -41,12 +41,12 @@ outputs:
+ 
+ flows:
+     flow0:
+-        input: input1
++        input: input0
+         models: [model0]
+         outputs: [output0]
+         mosaic:
+             mosaic0:
+-                width:  1280
+-                height: 720
+-                pos_x:  320
+-                pos_y:  180
++                width:  1920
++                height: 1080
++                pos_x:  0
++                pos_y:  0

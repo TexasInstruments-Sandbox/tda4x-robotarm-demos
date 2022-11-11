@@ -1,0 +1,2 @@
+shape_msgs/SolidPrimitive box
+geometry_msgs/Point center_point

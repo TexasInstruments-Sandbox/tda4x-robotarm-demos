@@ -1,0 +1,100 @@
+diff --git a/.docker/build_docker.sh b/.docker/build_docker.sh
+index 2d03685a..9feaea34 100755
+--- a/.docker/build_docker.sh
++++ b/.docker/build_docker.sh
+@@ -1,7 +1,7 @@
+ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+ 
+ # Can be changed, choices are: amd64 or arm64
+-ARCHITECTURE=amd64
++ARCHITECTURE=arm64
+ VERSION=v4.1.0
+ 
+ DOCKER_IMAGE_NAME=registry.gitlab.com/niryo/niryo-one-s/ned_ros_stack/${VERSION}
+diff --git a/.docker/run_docker.sh b/.docker/run_docker.sh
+index abdd7410..155a5b4c 100755
+--- a/.docker/run_docker.sh
++++ b/.docker/run_docker.sh
+@@ -1,5 +1,5 @@
+ # Can be changed, choices are: amd64 or arm64
+-ARCHITECTURE=amd64
++ARCHITECTURE=arm64
+ VERSION=v4.1.0
+ 
+ DOCKER_IMAGE_NAME=registry.gitlab.com/niryo/niryo-one-s/ned_ros_stack/${VERSION}
+@@ -31,23 +31,25 @@ fi
+ 
+ # If source located under current . folder
+ if [ -d ${PATH_TO_SOURCE_FOLDER}/niryo_robot_bringup ]; then
+-    docker run --rm --platform linux/${ARCHITECTURE} -it \
++    docker run --rm -it \
+     -v ${PATH_TO_SOURCE_FOLDER}:/${HOME_FOLDER}/catkin_ws/src \
+     -v ${PATH_TO_SOURCE_FOLDER}/../${DOCKER_OUTPUT_HOST_FOLDER_NAME}/${ARCHITECTURE}/install:/${HOME_FOLDER}/catkin_ws/install \
+     -v ${PATH_TO_SOURCE_FOLDER}/../${DOCKER_OUTPUT_HOST_FOLDER_NAME}/${ARCHITECTURE}/build:/${HOME_FOLDER}/catkin_ws/build \
+     -v ${PATH_TO_SOURCE_FOLDER}/../${DOCKER_OUTPUT_HOST_FOLDER_NAME}/${ARCHITECTURE}/devel:/${HOME_FOLDER}/catkin_ws/devel \
+     -p 9090:9090 \
+     -p 11311:11311 \
++    --network host \
+     ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} $@
+ # If source located under ./src folder
+ elif [ -d ${PATH_TO_SOURCE_FOLDER}/src ]; then
+-    docker run --rm --platform linux/${ARCHITECTURE} -it \
++    docker run --rm -it \
+     -v ${PATH_TO_SOURCE_FOLDER}/src:/${HOME_FOLDER}/catkin_ws/src \
+     -v ${PATH_TO_SOURCE_FOLDER}/${DOCKER_OUTPUT_HOST_FOLDER_NAME}/${ARCHITECTURE}/install:/${HOME_FOLDER}/catkin_ws/install \
+     -v ${PATH_TO_SOURCE_FOLDER}/${DOCKER_OUTPUT_HOST_FOLDER_NAME}/${ARCHITECTURE}/build:/${HOME_FOLDER}/catkin_ws/build \
+     -v ${PATH_TO_SOURCE_FOLDER}/${DOCKER_OUTPUT_HOST_FOLDER_NAME}/${ARCHITECTURE}/devel:/${HOME_FOLDER}/catkin_ws/devel \
+     -p 9090:9090 \
+     -p 11311:11311 \
++    --network host \
+     ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} $@
+ else
+     echo "Incorrect PATH_TO_SOURCE_FOLDER setted, cannot find ROS sources: ${PATH_TO_SOURCE_FOLDER}"
+diff --git a/niryo_robot_moveit_config/niryo_moveit_config_standalone/config/ned2/joint_limits.yaml b/niryo_robot_moveit_config/niryo_moveit_config_standalone/config/ned2/joint_limits.yaml
+index 0444340c..e5fdcafd 100644
+--- a/niryo_robot_moveit_config/niryo_moveit_config_standalone/config/ned2/joint_limits.yaml
++++ b/niryo_robot_moveit_config/niryo_moveit_config_standalone/config/ned2/joint_limits.yaml
+@@ -5,31 +5,31 @@
+ joint_limits:
+   joint_1:
+     has_velocity_limits: true
+-    max_velocity: 1.57
++    max_velocity: 2.57 #1.57
+     has_acceleration_limits: true
+-    max_acceleration: 2.0
++    max_acceleration: 3.0 #2.0
+   joint_2:
+     has_velocity_limits: true
+-    max_velocity: 1.047
++    max_velocity: 2.047 #1.047
+     has_acceleration_limits: true
+-    max_acceleration: 0.8
++    max_acceleration: 1.8 #0.8
+   joint_3:
+     has_velocity_limits: true
+-    max_velocity: 1.57
++    max_velocity: 2.57 # 1.57
+     has_acceleration_limits: true
+-    max_acceleration: 2.0
++    max_acceleration: 3.0 # 2.0
+   joint_4:
+     has_velocity_limits: true
+-    max_velocity: 3.14
++    max_velocity: 5.14 # 3.14
+     has_acceleration_limits: true
+-    max_acceleration: 3.0
++    max_acceleration: 4.0 #3.0
+   joint_5:
+     has_velocity_limits: true
+-    max_velocity: 3.14
++    max_velocity: 5.14 #3.14
+     has_acceleration_limits: true
+-    max_acceleration: 3.0
++    max_acceleration: 4.0 #3.0
+   joint_6:
+     has_velocity_limits: true
+-    max_velocity: 3.14
++    max_velocity: 5.14 # 3.14
+     has_acceleration_limits: true
+-    max_acceleration: 3.0
++    max_acceleration: 4.0 # 3.0

@@ -1,0 +1,7 @@
+[core]
+        gitproxy = none for ti.com
+        gitproxy = ~/git-proxy.sh
+[http]
+        proxy = http://webproxy.ext.ti.com:80
+[https]
+        proxy = http://webproxy.ext.ti.com:80

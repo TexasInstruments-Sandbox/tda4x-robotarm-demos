@@ -1,0 +1,12 @@
+{
+    "proxies":
+    {
+        "default":
+        {
+            "httpProxy": "http://wwwgate.ti.com:80",
+            "httpsProxy": "http://wwwgate.ti.com:80",
+            "ftpProxy": "http://wwwgate.ti.com:80",
+            "noProxy": "*.ti.com"
+        }
+    }
+}
